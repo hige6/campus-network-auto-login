@@ -1,0 +1,8 @@
+credential.xml
+settings.json
+status.json
+status.tmp
+worker.json
+CampusAutoLogin.exe
+*.log
+
