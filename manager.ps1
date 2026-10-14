@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([switch]$Uninstall, [switch]$LibraryOnly, [string]$PreviewPath)
 $ErrorActionPreference = 'Stop'
 $InstallRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CampusAutoLogin'
@@ -44,16 +44,16 @@ function Set-CampusAutostart([bool]$Enabled) {
     }
 }
 
-function Install-CampusApp($Credential, [bool]$Autostart) {
+function Install-CampusApp($Credential, [bool]$Autostart, [bool]$DisableWifiOnFailure = $false) {
     Stop-CampusWorker
     New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
-    foreach ($name in @('CampusAutoLogin.exe','campus-login.ps1','manager.ps1','login.cmd','uninstall.cmd','使用说明.md')) {
+    foreach ($name in @('CampusAutoLogin.exe','campus-login.ps1','manager.ps1','wifi-radio.ps1','login.cmd','uninstall.cmd','使用说明.md')) {
         $source = Join-Path $SourceRoot $name
         $destination = Join-Path $InstallRoot $name
         if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($destination)) { Copy-Item -LiteralPath $source -Destination $destination -Force }
     }
     $Credential | Export-Clixml -LiteralPath (Join-Path $InstallRoot 'credential.xml')
-    @{suffix=''; autostart=$Autostart} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallRoot 'settings.json') -Encoding UTF8
+    @{suffix=''; autostart=$Autostart; disableWifiOnFailure=$DisableWifiOnFailure} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallRoot 'settings.json') -Encoding UTF8
     Remove-Item -LiteralPath (Join-Path $InstallRoot 'status.json') -Force -ErrorAction SilentlyContinue
     Set-CampusAutostart $Autostart
     # CREATE_NO_WINDOW avoids allocating a console, including with Windows Terminal.
@@ -93,7 +93,7 @@ if ($Uninstall) {
 }
 $form = [Windows.Forms.Form]::new()
 $form.Text = '校园网自动登录'
-$form.ClientSize = [Drawing.Size]::new(560,465)
+$form.ClientSize = [Drawing.Size]::new(560,515)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
@@ -114,11 +114,12 @@ $suffixBox.Items.AddRange(@('移动校园（@cmccyx）','校园用户（@xyw）'
 $suffixBox.SelectedIndex=0; $form.Controls.Add($suffixBox)
 $null = Add-Label '已输入完整 @ 后缀时，不会额外追加后缀。' 180 187 350 40
 $autoBox = [Windows.Forms.CheckBox]::new(); $autoBox.Text='开机自启（登录 Windows 后自动启动）'; $autoBox.SetBounds(24,235,510,28); $form.Controls.Add($autoBox)
-$null = Add-Label '密码仅加密保存在本机；关闭此窗口后，后台检测继续运行。' 24 272 510 42
-$statusLabel = Add-Label '尚未启动。点击下方按钮即可启用，无需管理员权限。' 24 320 510 65
-$enableButton = [Windows.Forms.Button]::new(); $enableButton.Text='保存并启用'; $enableButton.SetBounds(24,410,160,36); $form.Controls.Add($enableButton)
-$webButton = [Windows.Forms.Button]::new(); $webButton.Text='打开登录网页'; $webButton.SetBounds(200,410,160,36); $form.Controls.Add($webButton)
-$removeButton = [Windows.Forms.Button]::new(); $removeButton.Text='卸载'; $removeButton.SetBounds(376,410,154,36); $form.Controls.Add($removeButton)
+$wifiBox = [Windows.Forms.CheckBox]::new(); $wifiBox.Text='认证失败或外网不通时关闭 Wi-Fi（不会自动打开）'; $wifiBox.SetBounds(24,270,510,28); $form.Controls.Add($wifiBox)
+$null = Add-Label '此项用于有线宽带：每次启用最多关闭一次，之后需手动开启 Wi-Fi。' 24 303 510 40
+$statusLabel = Add-Label '尚未启动。保存后后台持续运行，关闭本窗口不会停止检测。' 24 365 510 65
+$enableButton = [Windows.Forms.Button]::new(); $enableButton.Text='保存并启用'; $enableButton.SetBounds(24,460,160,36); $form.Controls.Add($enableButton)
+$webButton = [Windows.Forms.Button]::new(); $webButton.Text='打开登录网页'; $webButton.SetBounds(200,460,160,36); $form.Controls.Add($webButton)
+$removeButton = [Windows.Forms.Button]::new(); $removeButton.Text='卸载'; $removeButton.SetBounds(376,460,154,36); $form.Controls.Add($removeButton)
 $savedCredential = $null
 try {
     if ($PreviewPath) { throw '预览使用空白配置。' }
@@ -126,6 +127,7 @@ try {
     $accountBox.Text=$savedCredential.UserName
     $settings=Get-Content -LiteralPath (Join-Path $InstallRoot 'settings.json') -Raw | ConvertFrom-Json
     $autoBox.Checked=[bool]$settings.autostart
+    $wifiBox.Checked=[bool]$settings.disableWifiOnFailure
     $null = Add-Label '密码留空可沿用已保存的密码。' 180 135 350 18
 } catch { }
 $webButton.Add_Click({ Start-Process 'http://172.16.253.3/' })
@@ -142,7 +144,11 @@ $enableButton.Add_Click({
             $credential=[Management.Automation.PSCredential]::new($account,$secure)
         }
         $enableButton.Enabled=$false
-        $null = Install-CampusApp $credential $autoBox.Checked
+        if ($wifiBox.Checked) {
+            . (Join-Path $SourceRoot 'wifi-radio.ps1')
+            Request-CampusWifiAccess
+        }
+        $null = Install-CampusApp $credential $autoBox.Checked $wifiBox.Checked
         $script:savedCredential=$credential
         $passwordBox.Clear()
         $statusLabel.Text='已启用，正在检测网络。可以关闭窗口，后台将继续运行。'

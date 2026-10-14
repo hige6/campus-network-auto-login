@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$Setup,
     [switch]$Watch,
@@ -249,10 +249,13 @@ try {
     $settings = Get-Content -LiteralPath $SettingsFile -Raw | ConvertFrom-Json
     $nextLogin = [datetime]::MinValue
     $authFailures = 0
+    $wifiShutdownAttempted = $false
+    if ($settings.disableWifiOnFailure) { . (Join-Path $PSScriptRoot 'wifi-radio.ps1') }
     Save-CampusState 'checking' '后台检测已启动，正在检查校园网和外网连接。'
     do {
         try {
             $script:StopCampusWatch = $false
+            $checkWifiFailure = $false
             $status = Get-CampusStatus
             if ($status.internet_access) {
                 Save-CampusState 'online' '外网连接正常，后台每分钟自动检查。'
@@ -260,12 +263,14 @@ try {
                 $nextLogin = [datetime]::MinValue
             } elseif ([string]$status.result -eq '1') {
                 Save-CampusState 'limited' '学校接口显示在线，外网暂不可用；继续检测，不重复认证。'
+                $checkWifiFailure = $true
             } elseif ([string]$status.result -eq '0' -and (Get-Date) -ge $nextLogin) {
                 $config = Get-CampusText ($Portal + 'extern/20180816/config.js')
                 $method = Get-CampusMethod $config $status.v46ip
                 Save-CampusState 'connecting' '检测到未登录，正在自动认证。'
                 $nextLogin = (Get-Date).AddMinutes(5)
                 try {
+                    $checkWifiFailure = $true
                     Invoke-CampusLogin $status $credential $settings.suffix $method
                     $authFailures = 0
                     Save-CampusState 'checked' $script:LastLoginMessage
@@ -283,6 +288,19 @@ try {
             # Do not expose raw exception URLs or saved credentials in status files.
             Save-CampusState 'network_error' '暂时无法连接校园网接口。请连接学校 Wi-Fi 或网线，后台会自动重试。'
         }
+        if ($settings.disableWifiOnFailure -and $checkWifiFailure -and -not $wifiShutdownAttempted) {
+            # Recheck external access before changing the radio, once per activation.
+            if (-not (Test-CampusInternet)) {
+                $wifiShutdownAttempted = $true
+                try {
+                    $message = Disable-CampusWifi
+                    Save-CampusState 'wifi_off' $message
+                    $nextLogin = (Get-Date).AddMinutes(1)
+                } catch {
+                    Save-CampusState 'wifi_error' ('关闭 Wi-Fi 未完成：' + $_.Exception.Message + ' 本次启用不会再次尝试关闭。')
+                }
+            }
+        }
         if ($Watch) { Start-Sleep -Seconds $Interval }
     } while ($Watch)
 } catch {
@@ -295,3 +313,4 @@ try {
     }
     $mutex.Dispose()
 }
+
