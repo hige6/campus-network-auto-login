@@ -1,4 +1,6 @@
-# 校园网自动登录（Windows）
+# 安徽大学校园网自动登录程序
+
+项目仓库名：`campus-network-auto-login`。GitHub 仓库名仅允许 ASCII 字母、数字和 `.`、`-`、`_`，因此不能直接将仓库标识改为中文；本项目的中文名称为“安徽大学校园网自动登录程序”。[GitHub 仓库命名规则](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-new-repository)
 
 针对使用 `172.16.253.3` Dr.COM 门户的校园网，提供账号配置界面、后台无窗口检测、开机自启和自动重连。默认账号后缀 `@cmccyx`，也可从界面选择其他页面列出的后缀。只实现从学校当前配置探测到的 Portal method=1。
 
@@ -27,4 +29,3 @@
 ```
 
 这会使用系统内置 C# 编译工具生成 Windows 图形子系统启动器，不需要安装第三方依赖。
-
